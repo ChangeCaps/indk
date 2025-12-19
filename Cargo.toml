@@ -1,0 +1,19 @@
+[package]
+name = "indk"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["lib", "cdylib"]
+
+[dependencies]
+reqwest = "0.12"
+ike = { git = "https://github.com/ori-ui/ike" }
+#ike = { path = "../ike" }
+
+[dependencies.openssl]
+version = "0.10"
+features = ["vendored"]
+
+[package.metadata.android]
+package = "org.indk.indk"

@@ -1,0 +1,176 @@
+plugins {
+    id 'com.android.application'
+}
+
+def rustProjectDir = file('..')
+def rustTargets = [
+    'arm64-v8a' : 'aarch64-linux-android',
+    'x86_64'    : 'x86_64-linux-android',
+]
+
+android {
+    sourceSets {
+        main {
+            manifest.srcFile 'src/main/AndroidManifest.xml'
+            jniLibs.srcDirs = ["$buildDir/jniLibs"]
+        }
+    }
+}
+
+def stdout = new ByteArrayOutputStream()
+
+exec {
+    workingDir rustProjectDir
+    commandLine(
+        'cargo',
+        'metadata',
+        '--format-version', '1',
+        '--no-deps',
+    )
+    standardOutput = stdout
+}
+
+def cargoMetadata = new groovy.json.JsonSlurper()
+    .parseText(stdout.toString("UTF-8"))
+
+def cargoPackage = cargoMetadata.packages.find {
+    it.id == cargoMetadata.workspace_default_members[0]
+}
+
+def androidMetadata = cargoPackage.metadata.android
+
+if (androidMetadata.package == null) {
+    throw new GradleException("`package.metadata.android.package` should be set in Cargo.toml")
+}
+
+android.namespace                   = androidMetadata.'package'
+android.defaultConfig.applicationId = androidMetadata.'package'
+android.compileSdk                  = androidMetadata.'compile-sdk' ?: 35
+
+android.defaultConfig {
+    targetSdk   = androidMetadata.'target-sdk' ?: 35
+    minSdk      = androidMetadata.'min-sdk' ?: 21
+    versionName = androidMetadata.'version' ?: cargoPackage.version
+    versionCode = androidMetadata.'version-code' ?: 1
+
+    manifestPlaceholders.appName = androidMetadata.name ?: cargoPackage.name
+}
+
+tasks.register('run', Exec) {
+    group = 'help'
+    description = "Installs and runs the Debug build."
+    dependsOn 'installDebug'
+
+    def appId = android.defaultConfig.applicationId
+    def activity = "$appId/org.ori.RustActivity"
+
+    doFirst {
+        exec {
+            commandLine(
+                android.adbExecutable,
+                'logcat', '-c',
+            )
+        }
+
+        exec {
+            commandLine(
+                android.adbExecutable,
+                'shell',
+                'am', 'start',
+                '-n', activity,
+            )
+        }
+    }
+
+    commandLine(
+        android.adbExecutable,
+        'logcat', '*:S',
+        '-s', 'rust',
+        '-v', 'raw',
+    )
+}
+
+android.applicationVariants.all { variant ->
+    def variantName = variant.name.capitalize()
+    def buildType = variant.buildType.name
+
+    def buildTaskNames = []
+
+    rustTargets.each { abi, triple ->
+        def taskName = "cargoBuild$variantName${abi.capitalize()}"
+
+        tasks.register(taskName, Exec) {
+            group = 'rust'
+            description = "Build Rust ($buildType) for [$abi]."
+
+            workingDir rustProjectDir
+
+            commandLine(
+                'cargo', 'build', '--lib',
+                '--target', triple,
+                '--profile', buildType == 'release'
+                    ? 'release'
+                    : 'dev',
+                '--color', 'always',
+            )
+
+            def os = org.gradle.internal.os.OperatingSystem.current()
+            def host =
+                os.isMacOsX() ? "darwin-x86_64" :
+                os.isWindows() ? "windows-x86_64" :
+                "linux-x86_64"
+
+            def envTriple = triple.toUpperCase().replace('-', '_')
+            def llvmDir = "${android.ndkDirectory}/toolchains/llvm/prebuilt/${host}/bin"
+            def clang = "$triple${android.defaultConfig.minSdk}-clang"
+
+            environment 'ANDROID_SDK_ROOT', android.sdkDirectory
+            environment 'ANDROID_NDK', android.ndkDirectory
+            environment "CARGO_TARGET_${envTriple}_LINKER", "$llvmDir/$clang"
+            environment "CARGO_TARGET_${envTriple}_AR", "$llvmDir/llvm-ar"
+            environment "CC_${triple}", "$llvmDir/$clang"
+            environment "CXX_${triple}", "$llvmDir/$clang++"
+        }
+
+        buildTaskNames << taskName
+    }
+
+    def buildTaskName = "cargoBuild$variantName"
+
+    tasks.register(buildTaskName) {
+        group = 'rust'
+        description = "Build Rust ($buildType) for (all ABIs)."
+        dependsOn buildTaskNames
+    }
+
+    def copyTaskName = "copyJniLibs$variantName"
+
+    tasks.register(copyTaskName) {
+        group = 'rust'
+        description = "Copy compiled Rust ($buildType) shared objects for ${variant.name}."
+        dependsOn buildTaskName
+
+        doLast {
+            def targetDir = cargoMetadata.target_directory
+
+            rustTargets.each { abi, triple ->
+                def fromDir = file("$targetDir/$triple/$buildType")
+                def toDir = file("$buildDir/jniLibs/$abi")
+
+                copy {
+                    from fromDir
+                    include '*.so'
+                    into toDir
+
+                    rename { filename ->
+                        "librust.so"
+                    }
+                }
+            }
+        }
+    }
+
+    variant.preBuildProvider.configure {
+        dependsOn copyTaskName
+    }
+}
