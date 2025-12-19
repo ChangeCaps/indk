@@ -8,15 +8,6 @@ def rustTargets = [
     'x86_64'    : 'x86_64-linux-android',
 ]
 
-android {
-    sourceSets {
-        main {
-            manifest.srcFile 'src/main/AndroidManifest.xml'
-            jniLibs.srcDirs = ["$buildDir/jniLibs"]
-        }
-    }
-}
-
 def stdout = new ByteArrayOutputStream()
 
 exec {
@@ -43,51 +34,30 @@ if (androidMetadata.package == null) {
     throw new GradleException("`package.metadata.android.package` should be set in Cargo.toml")
 }
 
-android.namespace                   = androidMetadata.'package'
-android.defaultConfig.applicationId = androidMetadata.'package'
-android.compileSdk                  = androidMetadata.'compile-sdk' ?: 35
+android {
+    namespace  = androidMetadata.'package'
+    compileSdk = androidMetadata.'compile-sdk' ?: 35
 
-android.defaultConfig {
-    targetSdk   = androidMetadata.'target-sdk' ?: 35
-    minSdk      = androidMetadata.'min-sdk' ?: 21
-    versionName = androidMetadata.'version' ?: cargoPackage.version
-    versionCode = androidMetadata.'version-code' ?: 1
+    defaultConfig {
+        applicationId = androidMetadata.'package'
+        targetSdk     = androidMetadata.'target-sdk' ?: 35
+        minSdk        = androidMetadata.'min-sdk' ?: 21
+        versionName   = androidMetadata.'version' ?: cargoPackage.'version'
+        versionCode   = androidMetadata.'version-code' ?: 1
 
-    manifestPlaceholders.appName = androidMetadata.name ?: cargoPackage.name
-}
-
-tasks.register('run', Exec) {
-    group = 'help'
-    description = "Installs and runs the Debug build."
-    dependsOn 'installDebug'
-
-    def appId = android.defaultConfig.applicationId
-    def activity = "$appId/org.ori.RustActivity"
-
-    doFirst {
-        exec {
-            commandLine(
-                android.adbExecutable,
-                'logcat', '-c',
-            )
-        }
-
-        exec {
-            commandLine(
-                android.adbExecutable,
-                'shell',
-                'am', 'start',
-                '-n', activity,
-            )
-        }
+        manifestPlaceholders.appName = androidMetadata.'name' ?: cargoPackage.'name'
     }
 
-    commandLine(
-        android.adbExecutable,
-        'logcat', '*:S',
-        '-s', 'rust',
-        '-v', 'raw',
-    )
+    sourceSets {
+        main {
+            manifest.srcFile 'src/main/AndroidManifest.xml'
+            jniLibs.srcDirs = ["$buildDir/jniLibs"]
+        }
+    }
+}
+
+tasks.register("getAdbExe") {
+    print(android.getAdbExe())
 }
 
 android.applicationVariants.all { variant ->
