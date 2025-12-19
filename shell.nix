@@ -22,7 +22,7 @@ in pkgs.mkShell rec {
     pkgs.freetype
     pkgs.fontconfig
     pkgs.vulkan-loader
-    pkgs.vulkan-validation-layers
+    pkgs.openssl
 
     androidSdk
     pkgs.gradle
