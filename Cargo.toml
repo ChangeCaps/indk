@@ -1,12 +1,28 @@
 [package]
 name = "indk"
 version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[workspace]
+members = [
+  "indk-proto",
+  "indk-server",
+]
+
+[workspace.package]
 edition = "2024"
+
+[workspace.dependencies]
+indk-proto  = { path = "indk-proto"  }
+indk-server = { path = "indk-server" }
 
 [lib]
 crate-type = ["lib", "cdylib"]
 
 [dependencies]
+indk-proto.workspace = true
+
 reqwest = "0.12"
 ike = { git = "https://github.com/ori-ui/ike" }
 #ike = { path = "../ike" }

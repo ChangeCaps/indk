@@ -1,0 +1,12 @@
+[package]
+name = "indk-server"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+indk-proto.workspace = true
+
+axum = "0.8"
+eyre = "0.6"
+tokio = { version = "1", features = ["full"] }
