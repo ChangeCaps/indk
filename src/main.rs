@@ -1,3 +1,3 @@
-fn main() {
-    indk::main();
+fn main() -> eyre::Result<()> {
+    indk::main()
 }

@@ -7,16 +7,19 @@ use uuid::Uuid;
 
 #[ike::main]
 #[tokio::main]
-pub async fn main() {
-    let response = reqwest::Client::default()
-        // .get("ws://192.168.2.94:3000/api/v1/ws")
-        .get("ws://localhost:3000/api/v1/ws")
+pub async fn main() -> eyre::Result<()> {
+    let cert = reqwest::Certificate::from_pem(include_bytes!("cert.pem"))?;
+
+    let response = reqwest::Client::builder()
+        .add_root_certificate(cert)
+        .build()?
+        .get("wss://91.98.131.126/api/v1/ws")
         .upgrade()
         .send()
         .await
         .unwrap();
 
-    let websocket = response.into_websocket().await.unwrap();
+    let websocket = response.into_websocket().await?;
 
     let (mut sink, stream) = websocket.split();
     let (sender, mut receiver) = unbounded_channel();
@@ -24,11 +27,11 @@ pub async fn main() {
     tokio::spawn(async move {
         while let Some(request) = receiver.recv().await {
             let json = Message::text_from_json(&request).unwrap();
-            let _ = sink.send(json).await;
+            sink.send(json).await.unwrap();
         }
     });
 
-    sender.send(Request::GetItems).unwrap();
+    sender.send(Request::GetItems)?;
 
     let mut data = Data {
         sender,
@@ -37,6 +40,8 @@ pub async fn main() {
     };
 
     App::new().run(&mut data, ui);
+
+    Ok(())
 }
 
 struct Data {
@@ -80,8 +85,10 @@ fn ui(data: &mut Data) -> impl Effect<Data> + use<> {
                         data.items.insert(index, item);
                     }
 
-                    Response::ItemRemoved { index, .. } => {
-                        data.items.remove(index);
+                    Response::ItemRemoved { id, .. } => {
+                        if let Some(index) = data.items.iter().position(|i| i.id == id) {
+                            data.items.remove(index);
+                        }
                     }
 
                     Response::ItemRenamed { id, name } => {
@@ -103,6 +110,7 @@ fn ui(data: &mut Data) -> impl Effect<Data> + use<> {
 
 fn input(_data: &mut Data) -> impl View<Data> + use<> {
     entry()
+        .placeholder("Hvad mangler vi?")
         .submit_behaviour(SubmitBehaviour {
             keep_focus: true,
             clear_text: true,
@@ -120,11 +128,20 @@ fn input(_data: &mut Data) -> impl View<Data> + use<> {
 }
 
 fn items(data: &mut Data) -> impl View<Data> + use<> {
+    let complete = data
+        .items
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, i)| i.completed);
+
     let items = data
         .items
         .iter()
         .enumerate()
         .rev()
+        .filter(|(_, i)| !i.completed)
+        .chain(complete)
         .map(|(index, item)| self::item(index, item))
         .collect::<Vec<_>>();
 
@@ -140,7 +157,7 @@ fn item(index: usize, item: &Item) -> impl View<Data> + use<> {
         ))
         .gap(10.0),
     )
-    .border_width([1.0, 0.0, 1.0, 1.0])
+    .border_width([0.0, 0.0, 1.0, 1.0])
     .corner_radius(0.0)
 }
 
