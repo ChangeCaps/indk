@@ -1,41 +1,31 @@
-use futures::{SinkExt, StreamExt, stream::SplitStream};
+use futures::{SinkExt, StreamExt};
 use ike::prelude::*;
 use indk_proto::v1::{Item, Request, Response};
-use reqwest_websocket::{Message, RequestBuilderExt, WebSocket};
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use reqwest_websocket::{Message, RequestBuilderExt};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
 
 #[ike::main]
 #[tokio::main]
 pub async fn main() -> eyre::Result<()> {
-    let cert = reqwest::Certificate::from_pem(include_bytes!("cert.pem"))?;
+    App::install_log();
 
-    let response = reqwest::Client::builder()
-        .add_root_certificate(cert)
-        .build()?
-        .get("wss://91.98.131.126/api/v1/ws")
-        .upgrade()
-        .send()
-        .await
-        .unwrap();
-
-    let websocket = response.into_websocket().await?;
-
-    let (mut sink, stream) = websocket.split();
-    let (sender, mut receiver) = unbounded_channel();
+    let (response_tx, response_rx) = unbounded_channel();
+    let (request_tx, mut request_rx) = unbounded_channel();
 
     tokio::spawn(async move {
-        while let Some(request) = receiver.recv().await {
-            let json = Message::text_from_json(&request).unwrap();
-            sink.send(json).await.unwrap();
+        loop {
+            if let Err(err) = try_loop(&response_tx, &mut request_rx).await {
+                warn!("connection failed with {err:?}");
+            }
         }
     });
 
-    sender.send(Request::GetItems)?;
+    request_tx.send(Request::GetItems)?;
 
     let mut data = Data {
-        sender,
-        stream: Some(stream),
+        sender: request_tx,
+        receiver: Some(response_rx),
         items: Vec::new(),
     };
 
@@ -44,67 +34,105 @@ pub async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
+async fn try_loop(
+    sender: &UnboundedSender<Response>,
+    receiver: &mut UnboundedReceiver<Request>,
+) -> eyre::Result<()> {
+    let cert = reqwest::Certificate::from_pem(include_bytes!("cert.pem"))?;
+
+    let response = reqwest::Client::builder()
+        .add_root_certificate(cert)
+        .build()?
+        .get("wss://91.98.131.126/api/v1/ws")
+        .upgrade()
+        .send()
+        .await?;
+
+    let mut websocket = response.into_websocket().await?;
+
+    loop {
+        tokio::select! {
+            request = receiver.recv() => {
+                if let Some(request) = request {
+                    let json = Message::text_from_json(&request)?;
+                    websocket.send(json).await?;
+                } else {
+                    return Ok(());
+                }
+            }
+
+            message = websocket.next() => {
+                if let Some(message) = message {
+                    if let Ok(response) = message?.json() {
+                        sender.send(response)?;
+                    }
+                } else {
+                    return Ok(());
+                }
+
+            }
+        }
+    }
+}
+
 struct Data {
     sender: UnboundedSender<Request>,
-    stream: Option<SplitStream<WebSocket>>,
+    receiver: Option<UnboundedReceiver<Response>>,
     items: Vec<Item>,
 }
 
 fn ui(data: &mut Data) -> impl Effect<Data> + use<> {
-    let view = vstack((input(data), flex(items(data))))
-        .align(Align::Fill)
-        .gap(10.0);
+    let view = vstack((input(data), flex(items(data)), remove_completed())).align(Align::Fill);
+    let view = container(view).padding(0.0).corner_radius(0.0);
+    let view = pad([40.0, 10.0, 60.0, 10.0], view);
 
     provide(
         |_| TextTheme {
             font_size: 18.0,
             ..Default::default()
         },
-        effects((
-            window(pad([40.0, 10.0, 40.0, 10.0], view)),
-            task(
-                |data: &mut Data, sink| {
-                    let mut receiver = data.stream.take().unwrap();
+        effects((window(view), receive())),
+    )
+}
 
-                    async {
-                        tokio::spawn(async move {
-                            while let Some(Ok(message)) = receiver.next().await {
-                                if let Ok(response) = message.json() {
-                                    sink.send(response);
-                                }
-                            }
-                        });
-                    }
-                },
-                |data: &mut Data, response: Response| match response {
-                    Response::Items(items) => {
-                        data.items = items;
-                    }
+fn receive() -> impl Effect<Data> + use<> {
+    task(
+        |data: &mut Data, sink| {
+            let mut receiver = data.receiver.take().unwrap();
 
-                    Response::ItemCreated { item, index } => {
-                        data.items.insert(index, item);
-                    }
+            async move {
+                while let Some(response) = receiver.recv().await {
+                    sink.send(response);
+                }
+            }
+        },
+        |data: &mut Data, response: Response| match response {
+            Response::Items(items) => {
+                data.items = items;
+            }
 
-                    Response::ItemRemoved { id, .. } => {
-                        if let Some(index) = data.items.iter().position(|i| i.id == id) {
-                            data.items.remove(index);
-                        }
-                    }
+            Response::ItemCreated { item, index } => {
+                data.items.insert(index, item);
+            }
 
-                    Response::ItemRenamed { id, name } => {
-                        if let Some(item) = data.items.iter_mut().find(|i| i.id == id) {
-                            item.name = name;
-                        }
-                    }
+            Response::ItemRemoved { id, .. } => {
+                if let Some(index) = data.items.iter().position(|i| i.id == id) {
+                    data.items.remove(index);
+                }
+            }
 
-                    Response::ItemCompleted { id, completed } => {
-                        if let Some(item) = data.items.iter_mut().find(|i| i.id == id) {
-                            item.completed = completed;
-                        }
-                    }
-                },
-            ),
-        )),
+            Response::ItemRenamed { id, name } => {
+                if let Some(item) = data.items.iter_mut().find(|i| i.id == id) {
+                    item.name = name;
+                }
+            }
+
+            Response::ItemCompleted { id, completed } => {
+                if let Some(item) = data.items.iter_mut().find(|i| i.id == id) {
+                    item.completed = completed;
+                }
+            }
+        },
     )
 }
 
@@ -125,6 +153,8 @@ fn input(_data: &mut Data) -> impl View<Data> + use<> {
             data.sender.send(Request::CreateItem(item.clone())).unwrap();
             data.items.push(item.clone());
         })
+        .corner_radius(0.0)
+        .border_width([0.0, 0.0, 1.0, 0.0])
 }
 
 fn items(data: &mut Data) -> impl View<Data> + use<> {
@@ -145,7 +175,7 @@ fn items(data: &mut Data) -> impl View<Data> + use<> {
         .map(|(index, item)| self::item(index, item))
         .collect::<Vec<_>>();
 
-    vscroll(vstack(items)).bar_border_width(1.0)
+    vscroll(vstack(items)).bar_border_width([0.0, 0.0, 0.0, 1.0])
 }
 
 fn item(index: usize, item: &Item) -> impl View<Data> + use<> {
@@ -157,7 +187,7 @@ fn item(index: usize, item: &Item) -> impl View<Data> + use<> {
         ))
         .gap(10.0),
     )
-    .border_width([0.0, 0.0, 1.0, 1.0])
+    .border_width([0.0, 0.0, 1.0, 0.0])
     .corner_radius(0.0)
 }
 
@@ -219,4 +249,25 @@ fn remove_item(index: usize) -> impl View<Data> + use<> {
         },
     )
     .padding(4.0)
+}
+
+fn remove_completed() -> impl View<Data> + use<> {
+    using_or_default(|_, palette: &Palette| {
+        button(
+            center(label("Slet handlede").color(palette.surface)),
+            |data: &mut Data| {
+                data.items.retain(|item| {
+                    if item.completed {
+                        let _ = data.sender.send(Request::RemoveItem(item.id));
+                    }
+
+                    !item.completed
+                });
+            },
+        )
+        .padding(16.0)
+        .corner_radius(0.0)
+        .border_width([1.0, 0.0, 0.0, 0.0])
+        .color(palette.success)
+    })
 }

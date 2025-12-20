@@ -1172,7 +1172,6 @@ dependencies = [
 [[package]]
 name = "ike"
 version = "0.1.0"
-source = "git+https://github.com/ori-ui/ike#161fa2e9ede207baa2ecabaec8d943c897151c49"
 dependencies = [
  "copypasta",
  "ike-core",
@@ -1191,7 +1190,6 @@ dependencies = [
 [[package]]
 name = "ike-core"
 version = "0.1.0"
-source = "git+https://github.com/ori-ui/ike#161fa2e9ede207baa2ecabaec8d943c897151c49"
 dependencies = [
  "cursor-icon",
  "keyboard-types",
@@ -1202,7 +1200,6 @@ dependencies = [
 [[package]]
 name = "ike-macro"
 version = "0.1.0"
-source = "git+https://github.com/ori-ui/ike#161fa2e9ede207baa2ecabaec8d943c897151c49"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1212,7 +1209,6 @@ dependencies = [
 [[package]]
 name = "ike-skia"
 version = "0.1.0"
-source = "git+https://github.com/ori-ui/ike#161fa2e9ede207baa2ecabaec8d943c897151c49"
 dependencies = [
  "ash",
  "ash-window",
