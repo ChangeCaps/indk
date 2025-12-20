@@ -30,8 +30,7 @@ reqwest = "0.12"
 reqwest-websocket = { version = "0.5", features = ["json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
-# ike = { git = "https://github.com/ori-ui/ike" }
-ike = { path = "../ike" }
+ike = { git = "https://github.com/ori-ui/ike" }
 
 [dependencies.openssl]
 version = "0.10"
