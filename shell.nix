@@ -26,6 +26,7 @@ in pkgs.mkShell rec {
 
     androidSdk
     pkgs.gradle
+    pkgs.jdk17
   ];
 
   ANDROID_SDK_ROOT = "${androidSdk}/libexec/android-sdk";

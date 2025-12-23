@@ -34,9 +34,27 @@ if (androidMetadata.package == null) {
     throw new GradleException("`package.metadata.android.package` should be set in Cargo.toml")
 }
 
+def keystoreKeyAlias    = System.getenv('ANDROID_KEY_ALIAS')
+def keystoreKeyPassword = System.getenv('ANDROID_KEY_PASSWORD')
+def keystoreFile        = System.getenv('ANDROID_KEYSTORE')
+def keystorePassword    = System.getenv('ANDROID_KEYSTORE_PASSWORD')
+
+def keystorePropertiesPath = androidMetadata['key-properties'] ?: 'key.properties'
+def keystorePropertiesFile = rootProject.file(keystorePropertiesPath)
+if (keystorePropertiesFile.exists()) {
+    def keystoreProperties = new Properties()
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+
+    keystoreKeyAlias    = keystoreProperties['keyAlias']
+    keystoreKeyPassword = keystoreProperties['keyPassword']
+    keystorePassword    = keystoreProperties['storePassword']
+    keystoreFile        = keystoreProperties['storeFile']
+        ? file(keystoreProperties['storeFile']) : null
+}
+
 android {
-    namespace  = androidMetadata.'package'
-    compileSdk = androidMetadata.'compile-sdk' ?: 35
+    namespace  = androidMetadata['package']
+    compileSdk = androidMetadata['compile-sdk'] ?: 35
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -44,13 +62,29 @@ android {
     }
 
     defaultConfig {
-        applicationId = androidMetadata.'package'
-        targetSdk     = androidMetadata.'target-sdk' ?: 35
-        minSdk        = androidMetadata.'min-sdk' ?: 21
-        versionName   = androidMetadata.'version' ?: cargoPackage.'version'
-        versionCode   = androidMetadata.'version-code' ?: 1
+        applicationId = androidMetadata['package']
+        targetSdk     = androidMetadata['target-sdk'] ?: 35
+        minSdk        = androidMetadata['min-sdk'] ?: 21
+        versionName   = androidMetadata['version'] ?: cargoPackage['version']
+        versionCode   = androidMetadata['version-code'] ?: 1
 
-        manifestPlaceholders.appName = androidMetadata.'name' ?: cargoPackage.'name'
+        manifestPlaceholders.appName = androidMetadata['name']
+            ?: cargoPackage['name']
+    }
+
+    signingConfigs {
+        release {
+          keyAlias      keystoreKeyAlias
+          keyPassword   keystoreKeyPassword
+          storeFile     keystoreFile
+          storePassword keystorePassword
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig = signingConfigs.release
+        }
     }
 
     sourceSets {

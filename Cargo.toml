@@ -40,3 +40,7 @@ features = ["vendored"]
 package = "org.indk.indk"
 name = "Indk"
 min-sdk = 23
+key-properties = "key.properties"
+
+[profile.dev]
+debug = false

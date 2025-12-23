@@ -29,7 +29,7 @@ pub async fn main() -> eyre::Result<()> {
         items: Vec::new(),
     };
 
-    App::new().run(&mut data, ui);
+    App::new().run(&mut data, ui)?;
 
     Ok(())
 }
@@ -150,9 +150,10 @@ fn input(_data: &mut Data) -> impl View<Data> + use<> {
                 completed: false,
             };
 
-            data.sender.send(Request::CreateItem(item.clone())).unwrap();
-            data.items.push(item.clone());
+            let _ = data.sender.send(Request::CreateItem(item.clone()));
+            data.items.push(item);
         })
+        .padding(12.0)
         .corner_radius(0.0)
         .border_width([0.0, 0.0, 1.0, 0.0])
 }
