@@ -30,7 +30,7 @@ reqwest = "0.12"
 reqwest-websocket = { version = "0.5", features = ["json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
-ike = { git = "https://github.com/ori-ui/ike" }
+ori-native = { git = "https://github.com/ori-ui/ori-native" }
 
 [dependencies.openssl]
 version = "0.10"
@@ -41,6 +41,3 @@ package = "org.indk.indk"
 name = "Indk"
 min-sdk = 23
 key-properties = "key.properties"
-
-[profile.dev]
-debug = false

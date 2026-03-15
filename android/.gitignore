@@ -1,8 +1,6 @@
 # java artifacts
 /.gradle/
 /.settings/
+/build/
 /.project
 /.classpath
-/build/
-/keystore.jks
-/key.properties

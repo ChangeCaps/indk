@@ -48,11 +48,7 @@ async fn ws(State(server): State<Arc<ServerState>>, ws: WebSocketUpgrade) -> imp
                         break;
                     };
 
-                    let response = respond(&server, &update_sender, request).await;
-
-                    if let Ok(json) = serde_json::to_string(&response) {
-                        let _ = sender.send(Message::text(json)).await;
-                    }
+                    respond(&server, &update_sender, request).await;
                 }
             }
         }

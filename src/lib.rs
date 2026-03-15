@@ -1,24 +1,29 @@
+use std::thread;
+
 use futures::{SinkExt, StreamExt};
-use ike::prelude::*;
 use indk_proto::v1::{Item, Request, Response};
+use ori_native::prelude::*;
 use reqwest_websocket::{Message, RequestBuilderExt};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
 
-#[ike::main]
-#[tokio::main]
-pub async fn main() -> eyre::Result<()> {
-    App::install_log();
+#[ori_native::main]
+pub fn main() -> eyre::Result<()> {
+    App::init_log();
 
     let (response_tx, response_rx) = unbounded_channel();
     let (request_tx, mut request_rx) = unbounded_channel();
 
-    tokio::spawn(async move {
-        loop {
-            if let Err(err) = try_loop(&response_tx, &mut request_rx).await {
-                warn!("connection failed with {err:?}");
+    thread::spawn(|| {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        runtime.block_on(async move {
+            loop {
+                if let Err(err) = try_loop(&response_tx, &mut request_rx).await {
+                    warn!("connection failed with {err:?}");
+                }
             }
-        }
+        });
     });
 
     request_tx.send(Request::GetItems)?;
@@ -81,18 +86,23 @@ struct Data {
     items: Vec<Item>,
 }
 
-fn ui(data: &mut Data) -> impl Effect<Data> + use<> {
-    let view = vstack((input(data), flex(items(data)), remove_completed())).align(Align::Fill);
-    let view = container(view).padding(0.0).corner_radius(0.0);
-    let view = pad([40.0, 10.0, 60.0, 10.0], view);
+mod theme {
+    pub use ori_native::Color;
 
-    provide(
-        |_| TextTheme {
-            font_size: 18.0,
-            ..Default::default()
-        },
-        effects((window(view), receive())),
-    )
+    pub static BACKGROUND: Color = Color::hex("#F5F7FF");
+    pub static CONTRAST: Color = Color::hex("#0A0A0A");
+    pub static OUTLINE: Color = Color::BLACK.fade(0.2);
+    pub static PRIMARY: Color = Color::hex("#a6d189");
+}
+
+fn ui(data: &Data) -> impl Effect<Data> + use<> {
+    let view = column((input(data), items(data).flex(1.0), remove_completed()))
+        .background_color(theme::BACKGROUND)
+        .padding(10.0)
+        .flex(1.0)
+        .gap(12.0);
+
+    effects((window(view), receive()))
 }
 
 fn receive() -> impl Effect<Data> + use<> {
@@ -106,7 +116,7 @@ fn receive() -> impl Effect<Data> + use<> {
                 }
             }
         },
-        |data: &mut Data, response: Response| match response {
+        |data: &mut Data, _, response: Response| match response {
             Response::Items(items) => {
                 data.items = items;
             }
@@ -136,29 +146,40 @@ fn receive() -> impl Effect<Data> + use<> {
     )
 }
 
-fn input(_data: &mut Data) -> impl View<Data> + use<> {
-    entry()
-        .placeholder("Hvad mangler vi?")
-        .submit_behaviour(SubmitBehaviour {
-            keep_focus: true,
-            clear_text: true,
-        })
-        .on_submit(|data: &mut Data, text| {
-            let item = Item {
-                id: Uuid::new_v4(),
-                name: text,
-                completed: false,
-            };
+fn input(_data: &Data) -> impl View<Data> + use<> {
+    with(
+        |_| String::new(),
+        |state, _data| {
+            column(
+                textinput()
+                    .text(state)
+                    .size(18.0)
+                    .newline(Newline::None)
+                    .accept_tab(false)
+                    .color(theme::CONTRAST)
+                    .placeholder("Hvad mangler vi?")
+                    .placeholder_color(theme::CONTRAST.fade(0.6))
+                    .on_submit(|(state, data): &mut (String, Data), text| {
+                        state.clear();
 
-            let _ = data.sender.send(Request::CreateItem(item.clone()));
-            data.items.push(item);
-        })
-        .padding(12.0)
-        .corner_radius(0.0)
-        .border_width([0.0, 0.0, 1.0, 0.0])
+                        let item = Item {
+                            id: Uuid::new_v4(),
+                            name: text,
+                            completed: false,
+                        };
+
+                        let _ = data.sender.send(Request::CreateItem(item.clone()));
+                        data.items.push(item);
+                    }),
+            )
+            .background_color(theme::BACKGROUND.darken(0.04))
+            .corner(20.0)
+            .padding(12.0)
+        },
+    )
 }
 
-fn items(data: &mut Data) -> impl View<Data> + use<> {
+fn items(data: &Data) -> impl View<Data> + Layout + use<> {
     let complete = data
         .items
         .iter()
@@ -173,31 +194,33 @@ fn items(data: &mut Data) -> impl View<Data> + use<> {
         .rev()
         .filter(|(_, i)| !i.completed)
         .chain(complete)
-        .map(|(index, item)| self::item(index, item))
-        .collect::<Vec<_>>();
+        .map(|(index, item)| (item.id, self::item(index, item)));
 
-    vscroll(vstack(items)).bar_border_width([0.0, 0.0, 0.0, 1.0])
+    column(vscroll(column(keyed(items))))
+        .background_color(Color::BLACK.fade(0.05))
+        .corner(20.0)
+        .overflow(Overflow::Hidden)
+        .min_height(0.0)
 }
 
 fn item(index: usize, item: &Item) -> impl View<Data> + use<> {
-    container(
-        hstack((
-            item_completed(index, item.completed),
-            flex(item_name(index, &item.name)),
-            remove_item(index),
-        ))
-        .gap(10.0),
-    )
-    .border_width([0.0, 0.0, 1.0, 0.0])
-    .corner_radius(0.0)
+    row((
+        item_completed(index, item.completed),
+        item_name(index, &item.name).flex(1.0),
+        remove_item(index),
+    ))
+    .align_items(Align::Center)
+    .padding(12.0)
+    .gap(10.0)
 }
 
-fn item_name(index: usize, name: &str) -> impl View<Data> + use<> {
-    entry()
+fn item_name(index: usize, name: &str) -> impl View<Data> + Layout + use<> {
+    textinput()
         .text(name)
-        .border_width(0.0)
-        .background_color(Color::TRANSPARENT)
-        .padding(4.0)
+        .size(18.0)
+        .color(theme::CONTRAST)
+        .newline(Newline::None)
+        .accept_tab(false)
         .on_change(move |data: &mut Data, text| {
             let item = &mut data.items[index];
             item.name = text;
@@ -210,65 +233,72 @@ fn item_name(index: usize, name: &str) -> impl View<Data> + use<> {
 }
 
 fn item_completed(index: usize, completed: bool) -> impl View<Data> + use<> {
-    button(
-        using_or_default(move |_, palette: &Palette| {
-            let color = if completed {
-                palette.success
-            } else {
-                Color::TRANSPARENT
-            };
+    let color = if completed {
+        theme::PRIMARY
+    } else {
+        Color::TRANSPARENT
+    };
 
-            size(
-                [20.0, 20.0],
-                picture(Fit::Fill, include_svg!("check.svg")).color(color),
-            )
-        }),
-        move |data: &mut Data| {
-            let item = &mut data.items[index];
-            item.completed = !item.completed;
+    pressable(move |_, _| {
+        row(image(include_bytes!("check.svg"))
+            .tint(color)
+            .size(20.0, 20.0))
+        .border_color(theme::OUTLINE)
+        .padding(4.0)
+        .border(1.0)
+        .corner(8.0)
+    })
+    .on_press(move |data: &mut Data| {
+        let item = &mut data.items[index];
+        item.completed = !item.completed;
 
-            let _ = data.sender.send(Request::CompleteItem {
-                id: item.id,
-                completed: item.completed,
-            });
-        },
-    )
-    .padding(4.0)
+        let _ = data.sender.send(Request::CompleteItem {
+            id: item.id,
+            completed: item.completed,
+        });
+    })
 }
 
 fn remove_item(index: usize) -> impl View<Data> + use<> {
-    button(
-        using_or_default(|_, palette: &Palette| {
-            size(
-                [20.0, 20.0],
-                picture(Fit::Fill, include_svg!("xmark.svg")).color(palette.danger),
-            )
-        }),
-        move |data: &mut Data| {
-            let item = data.items.remove(index);
-            let _ = data.sender.send(Request::RemoveItem(item.id));
-        },
-    )
-    .padding(4.0)
+    pressable(|_, _| {
+        row(image(include_bytes!("xmark.svg"))
+            .tint(Color::RED)
+            .size(28.0, 28.0))
+        .padding(4.0)
+        .border(1.0)
+        .corner(8.0)
+    })
+    .on_press(move |data: &mut Data| {
+        let item = data.items.remove(index);
+        let _ = data.sender.send(Request::RemoveItem(item.id));
+    })
 }
 
 fn remove_completed() -> impl View<Data> + use<> {
-    using_or_default(|_, palette: &Palette| {
-        button(
-            center(label("Slet handlede").color(palette.surface)),
-            |data: &mut Data| {
-                data.items.retain(|item| {
-                    if item.completed {
-                        let _ = data.sender.send(Request::RemoveItem(item.id));
-                    }
+    pressable(|state, _| {
+        let color = match state.pressed {
+            true => theme::PRIMARY.fade(0.5),
+            false => theme::PRIMARY,
+        };
 
-                    !item.completed
-                });
-            },
-        )
-        .padding(16.0)
-        .corner_radius(0.0)
-        .border_width([1.0, 0.0, 0.0, 0.0])
-        .color(palette.success)
+        transition(color, Ease(0.1), |color, _| {
+            row(text("Slet handlede")
+                .color(Color::BLACK.fade(0.8))
+                .size(18.0))
+            .background_color(color)
+            .padding(20.0)
+            .corner(20.0)
+            .justify_contents(Justify::Center)
+            .align_items(Align::Center)
+        })
+    })
+    .on_press(|data: &mut Data| {
+        data.items.retain(|item| {
+            if item.completed {
+                let _ = data.sender.send(Request::RemoveItem(item.id));
+            }
+
+            !item.completed
+        });
     })
 }
