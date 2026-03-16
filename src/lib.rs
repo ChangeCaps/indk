@@ -174,7 +174,7 @@ fn input(_data: &Data) -> impl View<Data> + use<> {
             )
             .background_color(theme::BACKGROUND.darken(0.04))
             .corner(20.0)
-            .padding(12.0)
+            .padding(20.0)
         },
     )
 }
@@ -262,7 +262,7 @@ fn item_completed(index: usize, completed: bool) -> impl View<Data> + use<> {
 fn remove_item(index: usize) -> impl View<Data> + use<> {
     pressable(|_, _| {
         row(image(include_bytes!("xmark.svg"))
-            .tint(Color::RED)
+            .tint(Color::RED.fade(0.7))
             .size(28.0, 28.0))
         .padding(4.0)
         .border(1.0)
@@ -277,7 +277,7 @@ fn remove_item(index: usize) -> impl View<Data> + use<> {
 fn remove_completed() -> impl View<Data> + use<> {
     pressable(|state, _| {
         let color = match state.pressed {
-            true => theme::PRIMARY.fade(0.5),
+            true => theme::PRIMARY.darken(0.1),
             false => theme::PRIMARY,
         };
 
