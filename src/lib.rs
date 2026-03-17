@@ -1,5 +1,3 @@
-use std::thread;
-
 use futures::{SinkExt, StreamExt};
 use indk_proto::v1::{Item, Request, Response};
 use ori_native::prelude::*;
@@ -11,26 +9,8 @@ use uuid::Uuid;
 pub fn main() -> eyre::Result<()> {
     App::init_log();
 
-    let (response_tx, response_rx) = unbounded_channel();
-    let (request_tx, mut request_rx) = unbounded_channel();
-
-    thread::spawn(|| {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-
-        runtime.block_on(async move {
-            loop {
-                if let Err(err) = try_loop(&response_tx, &mut request_rx).await {
-                    warn!("connection failed with {err:?}");
-                }
-            }
-        });
-    });
-
-    request_tx.send(Request::GetItems)?;
-
     let mut data = Data {
-        sender: request_tx,
-        receiver: Some(response_rx),
+        sender: None,
         items: Vec::new(),
     };
 
@@ -40,7 +20,7 @@ pub fn main() -> eyre::Result<()> {
 }
 
 async fn try_loop(
-    sender: &UnboundedSender<Response>,
+    sender: &Sink<Response>,
     receiver: &mut UnboundedReceiver<Request>,
 ) -> eyre::Result<()> {
     let cert = reqwest::Certificate::from_pem(include_bytes!("cert.pem"))?;
@@ -70,7 +50,7 @@ async fn try_loop(
             message = websocket.next() => {
                 if let Some(message) = message {
                     if let Ok(response) = message?.json() {
-                        sender.send(response)?;
+                        sender.send(response);
                     }
                 } else {
                     return Ok(());
@@ -81,9 +61,16 @@ async fn try_loop(
 }
 
 struct Data {
-    sender: UnboundedSender<Request>,
-    receiver: Option<UnboundedReceiver<Response>>,
+    sender: Option<UnboundedSender<Request>>,
     items: Vec<Item>,
+}
+
+impl Data {
+    fn request(&self, request: Request) {
+        if let Some(ref sender) = self.sender {
+            let _ = sender.send(request);
+        }
+    }
 }
 
 mod theme {
@@ -127,11 +114,14 @@ fn ui(data: &Data) -> impl Effect<Data> + use<> {
 fn receive() -> impl Effect<Data> + use<> {
     task(
         |data: &mut Data, sink| {
-            let mut receiver = data.receiver.take().unwrap();
+            let (sender, mut receiver) = unbounded_channel();
+            data.sender = Some(sender);
 
             async move {
-                while let Some(response) = receiver.recv().await {
-                    sink.send(response);
+                loop {
+                    if let Err(err) = try_loop(&sink, &mut receiver).await {
+                        warn!("connection failed with {err:?}");
+                    }
                 }
             }
         },
@@ -187,7 +177,7 @@ fn input(_data: &Data) -> impl View<Data> + use<> {
                             completed: false,
                         };
 
-                        let _ = data.sender.send(Request::CreateItem(item.clone()));
+                        data.request(Request::CreateItem(item.clone()));
                         data.items.push(item);
                     }),
             )
@@ -244,10 +234,12 @@ fn item_name(index: usize, name: &str) -> impl View<Data> + Layout + use<> {
             let item = &mut data.items[index];
             item.name = text;
 
-            let _ = data.sender.send(Request::RenameItem {
+            let request = Request::RenameItem {
                 id: item.id,
                 name: item.name.clone(),
-            });
+            };
+
+            data.request(request);
         })
 }
 
@@ -271,10 +263,12 @@ fn item_completed(index: usize, completed: bool) -> impl View<Data> + use<> {
         let item = &mut data.items[index];
         item.completed = !item.completed;
 
-        let _ = data.sender.send(Request::CompleteItem {
+        let request = Request::CompleteItem {
             id: item.id,
             completed: item.completed,
-        });
+        };
+
+        data.request(request);
     })
 }
 
@@ -289,7 +283,7 @@ fn remove_item(index: usize) -> impl View<Data> + use<> {
     })
     .on_press(move |data: &mut Data| {
         let item = data.items.remove(index);
-        let _ = data.sender.send(Request::RemoveItem(item.id));
+        data.request(Request::RemoveItem(item.id));
     })
 }
 
@@ -313,8 +307,10 @@ fn remove_completed() -> impl View<Data> + use<> {
     })
     .on_press(|data: &mut Data| {
         data.items.retain(|item| {
-            if item.completed {
-                let _ = data.sender.send(Request::RemoveItem(item.id));
+            if item.completed
+                && let Some(ref sender) = data.sender
+            {
+                let _ = sender.send(Request::RemoveItem(item.id));
             }
 
             !item.completed
