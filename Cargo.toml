@@ -26,8 +26,8 @@ indk-proto.workspace = true
 eyre = "0.6"
 tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3", default-features = false }
-reqwest = "0.12"
-reqwest-websocket = { version = "0.5", features = ["json"] }
+reqwest = { version = "0.13", features = ["native-tls"] }
+reqwest-websocket = { version = "0.6", features = ["json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 ori-native = { git = "https://github.com/ori-ui/ori-native" }
@@ -39,5 +39,4 @@ features = ["vendored"]
 [package.metadata.android]
 package = "org.indk.indk"
 name = "Indk"
-min-sdk = 23
 key-properties = "key.properties"

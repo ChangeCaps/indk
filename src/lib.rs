@@ -3,7 +3,7 @@ use std::thread;
 use futures::{SinkExt, StreamExt};
 use indk_proto::v1::{Item, Request, Response};
 use ori_native::prelude::*;
-use reqwest_websocket::{Message, RequestBuilderExt};
+use reqwest_websocket::{Message, Upgrade};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
 
@@ -47,6 +47,7 @@ async fn try_loop(
 
     let response = reqwest::Client::builder()
         .add_root_certificate(cert)
+        .http1_only()
         .build()?
         .get("wss://91.98.131.126/api/v1/ws")
         .upgrade()
@@ -74,7 +75,6 @@ async fn try_loop(
                 } else {
                     return Ok(());
                 }
-
             }
         }
     }
@@ -89,20 +89,39 @@ struct Data {
 mod theme {
     pub use ori_native::Color;
 
-    pub static BACKGROUND: Color = Color::hex("#F5F7FF");
-    pub static CONTRAST: Color = Color::hex("#0A0A0A");
+    pub static BACKGROUND: Color = Color::hex("#f5f7ff");
+    pub static CONTRAST: Color = Color::hex("#0a0a0a");
     pub static OUTLINE: Color = Color::BLACK.fade(0.2);
     pub static PRIMARY: Color = Color::hex("#a6d189");
 }
 
 fn ui(data: &Data) -> impl Effect<Data> + use<> {
-    let view = column((input(data), items(data).flex(1.0), remove_completed()))
-        .background_color(theme::BACKGROUND)
-        .padding(10.0)
-        .flex(1.0)
-        .gap(12.0);
+    let view = column(
+        safe_area(
+            column((input(data), items(data).flex(1.0), remove_completed()))
+                .flex(1.0)
+                .gap(12.0),
+        )
+        .min_height(0.0)
+        .flex(1.0),
+    )
+    .background_color(theme::BACKGROUND)
+    .padding(10.0)
+    .flex(1.0);
 
-    effects((window(view), receive()))
+    effects((
+        window(view)
+            .status_bar(StatusBar {
+                color: Some(theme::BACKGROUND),
+                light: true,
+                ..Default::default()
+            })
+            .navigation_bar(NavigationBar {
+                color: Some(theme::BACKGROUND),
+                light: true,
+            }),
+        receive(),
+    ))
 }
 
 fn receive() -> impl Effect<Data> + use<> {
@@ -196,7 +215,7 @@ fn items(data: &Data) -> impl View<Data> + Layout + use<> {
         .chain(complete)
         .map(|(index, item)| (item.id, self::item(index, item)));
 
-    column(vscroll(column(keyed(items))))
+    column(vscroll(column(keyed(items))).flex(1.0))
         .background_color(Color::BLACK.fade(0.05))
         .corner(20.0)
         .overflow(Overflow::Hidden)
