@@ -40,3 +40,8 @@ features = ["vendored"]
 package = "org.indk.indk"
 name = "Indk"
 key-properties = "key.properties"
+
+[profile.dev]
+opt-level = 1
+overflow-checks = false
+debug = "limited"

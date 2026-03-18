@@ -90,7 +90,7 @@ fn ui(data: &Data) -> impl Effect<Data> + use<> {
         Ease(0.4),
         |data, t| {
             let menu = (t > 0.0).then(|| menu(data, t));
-            flex((main_page(data), menu)).flex(1.0)
+            flex((main_page(data), menu)).flex(1.0).min_height(0.0)
         },
     ))
     .background_color(theme::BACKGROUND)
@@ -98,6 +98,7 @@ fn ui(data: &Data) -> impl Effect<Data> + use<> {
 
     effects((
         window(view)
+            .sizing(Sizing::Content)
             .status_bar(StatusBar {
                 color: Some(Color::TRANSPARENT),
                 light: true,
@@ -124,7 +125,7 @@ fn menu(_data: &Data, t: f32) -> impl View<Data> + use<> {
         pressable(|_, _| column(()).flex(1.0))
             .on_press(|data: &mut Data| data.is_menu_open = false),
     ))
-    .overflow(Overflow::Visible)
+    .overflow(Overflow::Hidden)
     .background_color(Color::BLACK.fade(0.2 * t))
     .position(Position::Absolute)
     .inset(0.0)
@@ -137,11 +138,11 @@ fn main_page(data: &Data) -> impl View<Data> + use<> {
             items(data).flex(1.0),
             remove_completed(),
         ))
+        .min_height(0.0)
         .padding(10.0)
         .flex(1.0)
         .gap(12.0),
     )
-    .min_height(0.0)
     .flex(1.0)
 }
 
@@ -170,6 +171,7 @@ fn receive() -> impl Effect<Data> + use<> {
     task(
         |data: &mut Data, sink| {
             let (sender, mut receiver) = unbounded_channel();
+            let _ = sender.send(Request::GetItems);
             data.sender = Some(sender);
 
             async move {
@@ -265,7 +267,6 @@ fn items(data: &Data) -> impl View<Data> + Layout + use<> {
         .background_color(Color::BLACK.fade(0.05))
         .corner(20.0)
         .overflow(Overflow::Hidden)
-        .min_height(0.0)
 }
 
 fn item(index: usize, item: &Item) -> impl View<Data> + use<> {
