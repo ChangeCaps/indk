@@ -85,25 +85,21 @@ mod theme {
 }
 
 fn ui(data: &Data) -> impl Effect<Data> + use<> {
-    let view = column(
-        safe_area(transition(
-            data.is_menu_open as i32 as f32,
-            Ease(0.4),
-            |data, t| {
-                let menu = (t > 0.0).then(|| menu(data, t));
-                flex((main_page(data), menu)).flex(1.0)
-            },
-        ))
-        .min_height(0.0)
-        .flex(1.0),
-    )
+    let view = column(transition(
+        data.is_menu_open as i32 as f32,
+        Ease(0.4),
+        |data, t| {
+            let menu = (t > 0.0).then(|| menu(data, t));
+            flex((main_page(data), menu)).flex(1.0)
+        },
+    ))
     .background_color(theme::BACKGROUND)
     .flex(1.0);
 
     effects((
         window(view)
             .status_bar(StatusBar {
-                color: Some(theme::BACKGROUND),
+                color: Some(Color::TRANSPARENT),
                 light: true,
                 ..Default::default()
             })
@@ -135,14 +131,18 @@ fn menu(_data: &Data, t: f32) -> impl View<Data> + use<> {
 }
 
 fn main_page(data: &Data) -> impl View<Data> + use<> {
-    column((
-        row((input(data), menu_button())).gap(10.0),
-        items(data).flex(1.0),
-        remove_completed(),
-    ))
-    .padding(10.0)
+    safe_area(
+        column((
+            row((input(data), menu_button())).gap(10.0),
+            items(data).flex(1.0),
+            remove_completed(),
+        ))
+        .padding(10.0)
+        .flex(1.0)
+        .gap(12.0),
+    )
+    .min_height(0.0)
     .flex(1.0)
-    .gap(12.0)
 }
 
 fn menu_button() -> impl View<Data> + use<> {
