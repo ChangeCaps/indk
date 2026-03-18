@@ -12,6 +12,7 @@ pub fn main() -> eyre::Result<()> {
     let mut data = Data {
         sender: None,
         items: Vec::new(),
+        is_menu_open: false,
     };
 
     App::new().run(&mut data, ui)?;
@@ -63,6 +64,7 @@ async fn try_loop(
 struct Data {
     sender: Option<UnboundedSender<Request>>,
     items: Vec<Item>,
+    is_menu_open: bool,
 }
 
 impl Data {
@@ -84,16 +86,18 @@ mod theme {
 
 fn ui(data: &Data) -> impl Effect<Data> + use<> {
     let view = column(
-        safe_area(
-            column((input(data), items(data).flex(1.0), remove_completed()))
-                .flex(1.0)
-                .gap(12.0),
-        )
+        safe_area(transition(
+            data.is_menu_open as i32 as f32,
+            Ease(0.4),
+            |data, t| {
+                let menu = (t > 0.0).then(|| menu(data, t));
+                flex((main_page(data), menu)).flex(1.0)
+            },
+        ))
         .min_height(0.0)
         .flex(1.0),
     )
     .background_color(theme::BACKGROUND)
-    .padding(10.0)
     .flex(1.0);
 
     effects((
@@ -109,6 +113,57 @@ fn ui(data: &Data) -> impl Effect<Data> + use<> {
             }),
         receive(),
     ))
+}
+
+fn menu(_data: &Data, t: f32) -> impl View<Data> + use<> {
+    row((
+        column(())
+            .left(Fract(t - 1.0))
+            .width(Fract(0.7))
+            .background_color(theme::BACKGROUND)
+            .shadow_color(Color::BLACK.fade(0.4))
+            .shadow_radius(50.0)
+            .corner_top_right(20.0)
+            .corner_bottom_right(20.0),
+        pressable(|_, _| column(()).flex(1.0))
+            .on_press(|data: &mut Data| data.is_menu_open = false),
+    ))
+    .overflow(Overflow::Visible)
+    .background_color(Color::BLACK.fade(0.2 * t))
+    .position(Position::Absolute)
+    .inset(0.0)
+}
+
+fn main_page(data: &Data) -> impl View<Data> + use<> {
+    column((
+        row((input(data), menu_button())).gap(10.0),
+        items(data).flex(1.0),
+        remove_completed(),
+    ))
+    .padding(10.0)
+    .flex(1.0)
+    .gap(12.0)
+}
+
+fn menu_button() -> impl View<Data> + use<> {
+    pressable(|_, state| {
+        let color = match state.pressed {
+            true => theme::PRIMARY.darken(0.1),
+            false => theme::PRIMARY,
+        };
+
+        transition(color, Ease(0.1), |_, color| {
+            row(image(include_bytes!("menu.svg"))
+                .size(28.0, 28.0)
+                .tint(theme::CONTRAST.fade(0.8)))
+            .background_color(color.fade(0.5))
+            .padding(20.0)
+            .corner(20.0)
+            .justify_contents(Justify::Center)
+            .align_items(Align::Center)
+        })
+    })
+    .on_press(|data: &mut Data| data.is_menu_open = true)
 }
 
 fn receive() -> impl Effect<Data> + use<> {
@@ -184,6 +239,7 @@ fn input(_data: &Data) -> impl View<Data> + use<> {
             .background_color(theme::BACKGROUND.darken(0.04))
             .corner(20.0)
             .padding(20.0)
+            .flex(1.0)
         },
     )
 }
@@ -288,13 +344,13 @@ fn remove_item(index: usize) -> impl View<Data> + use<> {
 }
 
 fn remove_completed() -> impl View<Data> + use<> {
-    pressable(|state, _| {
+    pressable(|_, state| {
         let color = match state.pressed {
             true => theme::PRIMARY.darken(0.1),
             false => theme::PRIMARY,
         };
 
-        transition(color, Ease(0.1), |color, _| {
+        transition(color, Ease(0.1), |_, color| {
             row(text("Slet handlede")
                 .color(Color::BLACK.fade(0.8))
                 .size(18.0))
