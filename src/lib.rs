@@ -21,7 +21,7 @@ pub fn main() -> eyre::Result<()> {
 }
 
 async fn try_loop(
-    sender: &Sink<Response>,
+    sink: &Sink<Response>,
     receiver: &mut UnboundedReceiver<Request>,
 ) -> eyre::Result<()> {
     let cert = reqwest::Certificate::from_pem(include_bytes!("cert.pem"))?;
@@ -51,7 +51,7 @@ async fn try_loop(
             message = websocket.next() => {
                 if let Some(message) = message {
                     if let Ok(response) = message?.json() {
-                        sender.send(response);
+                        sink.send(response);
                     }
                 } else {
                     return Ok(());
@@ -87,7 +87,7 @@ mod theme {
 fn ui(data: &Data) -> impl Effect<Data> + use<> {
     let view = column(transition(
         data.is_menu_open as i32 as f32,
-        Ease(0.4),
+        BackInOut(0.8),
         |data, t| {
             let menu = (t > 0.0).then(|| menu(data, t));
             flex((main_page(data), menu)).flex(1.0).min_height(0.0)
@@ -98,7 +98,6 @@ fn ui(data: &Data) -> impl Effect<Data> + use<> {
 
     effects((
         window(view)
-            .sizing(Sizing::Content)
             .status_bar(StatusBar {
                 color: Some(Color::TRANSPARENT),
                 light: true,
@@ -113,22 +112,22 @@ fn ui(data: &Data) -> impl Effect<Data> + use<> {
 }
 
 fn menu(_data: &Data, t: f32) -> impl View<Data> + use<> {
-    row((
-        column(())
-            .left(Fract(t - 1.0))
-            .width(Fract(0.7))
-            .background_color(theme::BACKGROUND)
-            .shadow_color(Color::BLACK.fade(0.4))
-            .shadow_radius(50.0)
-            .corner_top_right(20.0)
-            .corner_bottom_right(20.0),
-        pressable(|_, _| column(()).flex(1.0))
-            .on_press(|data: &mut Data| data.is_menu_open = false),
-    ))
-    .overflow(Overflow::Hidden)
-    .background_color(Color::BLACK.fade(0.2 * t))
-    .position(Position::Absolute)
-    .inset(0.0)
+    pressable(move |_, _| {
+        row(pressable(move |_, _| {
+            column(())
+                .left(Fract(t * 0.7 - 1.0))
+                .width(Fract(1.0))
+                .background_color(theme::BACKGROUND)
+                .shadow_color(Color::BLACK.fade(0.4))
+                .shadow_radius(50.0)
+                .corner(20.0)
+        })
+        .on_press(|_| info!("click")))
+        .background_color(Color::BLACK.fade(0.2 * t))
+        .position(Position::Absolute)
+        .inset(0.0)
+    })
+    .on_press(|data: &mut Data| data.is_menu_open = false)
 }
 
 fn main_page(data: &Data) -> impl View<Data> + use<> {
@@ -141,7 +140,8 @@ fn main_page(data: &Data) -> impl View<Data> + use<> {
         .min_height(0.0)
         .padding(10.0)
         .flex(1.0)
-        .gap(12.0),
+        .gap(12.0)
+        .hardware_layer(true),
     )
     .flex(1.0)
 }
