@@ -1,6 +1,6 @@
 mod v1;
 
-use std::{net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use std::{env, net::SocketAddr, path::Path, sync::Arc, time::Duration};
 
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
@@ -13,8 +13,6 @@ use uuid::Uuid;
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     let data_path = "data.json";
-
-    let config = RustlsConfig::from_pem_file("cert.pem", "key.pem").await?;
 
     let server = ServerState::load(data_path).await.unwrap_or_default();
     let server = Arc::new(server);
@@ -36,15 +34,22 @@ async fn main() -> eyre::Result<()> {
         .with_state(server);
 
     let addr = SocketAddr::from(([0; 4], 443));
-    axum_server::bind_rustls(addr, config)
-        .serve(app.into_make_service())
-        .await?;
+
+    if env::var("INDK_SERVER_LOCAL").is_ok() {
+        axum::serve(tokio::net::TcpListener::bind(addr).await?, app).await?;
+    } else {
+        let config = RustlsConfig::from_pem_file("cert.pem", "key.pem").await?;
+        axum_server::bind_rustls(addr, config)
+            .serve(app.into_make_service())
+            .await?;
+    }
 
     Ok(())
 }
 
 #[derive(Default)]
 struct ServerState {
+    lists: Lists,
     items: Items,
     senders: RwLock<Vec<UnboundedSender<indk_proto::v1::Response>>>,
 }
@@ -70,20 +75,23 @@ impl ServerState {
 
         match data {
             Data::V1(data) => {
-                let items = DashMap::new();
-                let mut order = Vec::new();
+                let lists = DashMap::new();
+                let mut list_order = Vec::new();
 
-                for item in data.items {
-                    order.push(item.id);
-                    items.insert(item.id, item);
+                for list in data.lists {
+                    list_order.push(list.id);
+                    lists.insert(list.id, list);
                 }
+
+                let items = data.items.into_iter().map(|item| (item.id, item)).collect();
 
                 Ok(Self {
                     senders: RwLock::new(Vec::new()),
-                    items: Items {
-                        items,
-                        order: RwLock::new(order),
+                    lists: Lists {
+                        lists,
+                        order: RwLock::new(list_order),
                     },
+                    items: Items { items },
                 })
             }
         }
@@ -91,6 +99,7 @@ impl ServerState {
 
     async fn store(&self, path: impl AsRef<Path>) -> eyre::Result<()> {
         let data = Data::V1(v1::Data {
+            lists: self.get_lists(),
             items: self.get_items(),
         });
 
@@ -100,23 +109,32 @@ impl ServerState {
         Ok(())
     }
 
-    fn get_items(&self) -> Vec<indk_proto::v1::Item> {
-        let mut items = Vec::new();
+    fn get_lists(&self) -> Vec<v1::List> {
+        let mut lists = Vec::new();
 
-        for item in self.items.order.read().iter() {
-            if let Some(item) = self.items.items.get(item) {
-                items.push(item.clone());
+        for list in self.lists.order.read().iter() {
+            if let Some(item) = self.lists.lists.get(list) {
+                lists.push(item.clone());
             }
         }
 
-        items
+        lists
     }
+
+    fn get_items(&self) -> Vec<indk_proto::v1::Item> {
+        self.items.items.iter().map(|item| item.clone()).collect()
+    }
+}
+
+#[derive(Default)]
+struct Lists {
+    lists: DashMap<Uuid, v1::List>,
+    order: RwLock<Vec<Uuid>>,
 }
 
 #[derive(Default)]
 struct Items {
     items: DashMap<Uuid, indk_proto::v1::Item>,
-    order: RwLock<Vec<Uuid>>,
 }
 
 #[derive(Serialize, Deserialize)]

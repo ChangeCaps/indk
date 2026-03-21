@@ -1,18 +1,22 @@
+use std::env;
+
 use futures::{SinkExt, StreamExt};
-use indk_proto::v1::{Item, Request, Response};
+use indk_proto::v1::{Item, List, Request, Response};
 use ori_native::prelude::*;
 use reqwest_websocket::{Message, Upgrade};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use uuid::Uuid;
+
+mod ui;
 
 #[ori_native::main]
 pub fn main() -> eyre::Result<()> {
     App::init_log();
 
     let mut data = Data {
+        page: Page::Main,
+        global: Global { lists: Vec::new() },
         sender: None,
-        items: Vec::new(),
-        is_menu_open: false,
     };
 
     App::new().run(&mut data, ui)?;
@@ -24,13 +28,15 @@ async fn try_loop(
     sink: &Sink<Response>,
     receiver: &mut UnboundedReceiver<Request>,
 ) -> eyre::Result<()> {
+    let api_url = env::var("INDK_API").unwrap_or_else(|_| String::from("wss://91.98.131.126"));
+
     let cert = reqwest::Certificate::from_pem(include_bytes!("cert.pem"))?;
 
     let response = reqwest::Client::builder()
         .add_root_certificate(cert)
         .http1_only()
         .build()?
-        .get("wss://91.98.131.126/api/v1/ws")
+        .get(format!("{api_url}/api/v1/ws"))
         .upgrade()
         .send()
         .await?;
@@ -62,17 +68,24 @@ async fn try_loop(
 }
 
 struct Data {
+    page: Page,
+    global: Global,
     sender: Option<UnboundedSender<Request>>,
-    items: Vec<Item>,
-    is_menu_open: bool,
 }
 
-impl Data {
-    fn request(&self, request: Request) {
-        if let Some(ref sender) = self.sender {
-            let _ = sender.send(request);
-        }
-    }
+struct Global {
+    lists: Vec<List>,
+}
+
+enum Page {
+    Main,
+    List(ListData),
+}
+
+struct ListData {
+    id: Uuid,
+    items: Vec<Item>,
+    is_menu_open: bool,
 }
 
 mod theme {
@@ -85,19 +98,18 @@ mod theme {
 }
 
 fn ui(data: &Data) -> impl Effect<Data> + use<> {
-    let view = column(transition(
-        data.is_menu_open as i32 as f32,
-        BackInOut(0.8),
-        |data, t| {
-            let menu = (t > 0.0).then(|| menu(data, t));
-            flex((main_page(data), menu)).flex(1.0).min_height(0.0)
-        },
-    ))
-    .background_color(theme::BACKGROUND)
-    .flex(1.0);
+    let contents = match data.page {
+        Page::Main => any(ui::main::page(data)),
+
+        Page::List(ref data) => any(map_with(ui::list::page(data), |data: &mut Data, map| {
+            if let Page::List(ref mut list_data) = data.page {
+                map(&mut data.global, list_data);
+            }
+        })),
+    };
 
     effects((
-        window(view)
+        window(contents)
             .status_bar(StatusBar {
                 color: Some(Color::TRANSPARENT),
                 light: true,
@@ -107,71 +119,25 @@ fn ui(data: &Data) -> impl Effect<Data> + use<> {
                 color: Some(theme::BACKGROUND),
                 light: true,
             }),
-        receive(),
+        responses(),
+        receive(|data: &mut Data, request: Request| {
+            if let Some(ref sender) = data.sender {
+                let _ = sender.send(request);
+            }
+
+            Action::new()
+        }),
+        receive(|data: &mut Data, page: Page| {
+            data.page = page;
+        }),
     ))
 }
 
-fn menu(_data: &Data, t: f32) -> impl View<Data> + use<> {
-    pressable(move |_, _| {
-        row(pressable(move |_, _| {
-            column(())
-                .left(Fract(t * 0.7 - 1.0))
-                .width(Fract(1.0))
-                .background_color(theme::BACKGROUND)
-                .shadow_color(Color::BLACK.fade(0.4))
-                .shadow_radius(50.0)
-                .corner(20.0)
-        })
-        .on_press(|_| info!("click")))
-        .background_color(Color::BLACK.fade(0.2 * t))
-        .position(Position::Absolute)
-        .inset(0.0)
-    })
-    .on_press(|data: &mut Data| data.is_menu_open = false)
-}
-
-fn main_page(data: &Data) -> impl View<Data> + use<> {
-    safe_area(
-        column((
-            row((input(data), menu_button())).gap(10.0),
-            items(data).flex(1.0),
-            remove_completed(),
-        ))
-        .min_height(0.0)
-        .padding(10.0)
-        .flex(1.0)
-        .gap(12.0)
-        .hardware_layer(true),
-    )
-    .flex(1.0)
-}
-
-fn menu_button() -> impl View<Data> + use<> {
-    pressable(|_, state| {
-        let color = match state.pressed {
-            true => theme::PRIMARY.darken(0.1),
-            false => theme::PRIMARY,
-        };
-
-        transition(color, Ease(0.1), |_, color| {
-            row(image(include_bytes!("menu.svg"))
-                .size(28.0, 28.0)
-                .tint(theme::CONTRAST.fade(0.8)))
-            .background_color(color.fade(0.5))
-            .padding(20.0)
-            .corner(20.0)
-            .justify_contents(Justify::Center)
-            .align_items(Align::Center)
-        })
-    })
-    .on_press(|data: &mut Data| data.is_menu_open = true)
-}
-
-fn receive() -> impl Effect<Data> + use<> {
+fn responses() -> impl Effect<Data> + use<> {
     task(
         |data: &mut Data, sink| {
             let (sender, mut receiver) = unbounded_channel();
-            let _ = sender.send(Request::GetItems);
+            let _ = sender.send(Request::GetLists {});
             data.sender = Some(sender);
 
             async move {
@@ -183,194 +149,72 @@ fn receive() -> impl Effect<Data> + use<> {
             }
         },
         |data: &mut Data, _, response: Response| match response {
-            Response::Items(items) => {
-                data.items = items;
+            Response::Lists { lists } => {
+                data.global.lists = lists;
             }
 
-            Response::ItemCreated { item, index } => {
-                data.items.insert(index, item);
+            Response::ListCreated { list, index } => {
+                data.global.lists.insert(index, list);
             }
 
-            Response::ItemRemoved { id, .. } => {
-                if let Some(index) = data.items.iter().position(|i| i.id == id) {
-                    data.items.remove(index);
+            Response::ListRemoved { list } => {
+                if let Some(index) = data.global.lists.iter().position(|l| l.id == list) {
+                    data.global.lists.remove(index);
                 }
             }
 
-            Response::ItemRenamed { id, name } => {
-                if let Some(item) = data.items.iter_mut().find(|i| i.id == id) {
+            Response::ListRenamed { list, name } => {
+                if let Some(item) = data.global.lists.iter_mut().find(|l| l.id == list) {
                     item.name = name;
                 }
             }
 
-            Response::ItemCompleted { id, completed } => {
-                if let Some(item) = data.items.iter_mut().find(|i| i.id == id) {
+            Response::Items { list, items } => {
+                if let Page::List(ref mut data) = data.page
+                    && data.id == list
+                {
+                    data.items = items;
+                }
+            }
+
+            Response::ItemCreated { list, item, index } => {
+                if let Page::List(ref mut data) = data.page
+                    && data.id == list
+                {
+                    data.items.insert(index, item);
+                }
+            }
+
+            Response::ItemRemoved { list, item, .. } => {
+                if let Page::List(ref mut data) = data.page
+                    && let Some(index) = data.items.iter().position(|i| i.id == item)
+                    && data.id == list
+                {
+                    data.items.remove(index);
+                }
+            }
+
+            Response::ItemRenamed { list, item, name } => {
+                if let Page::List(ref mut data) = data.page
+                    && let Some(item) = data.items.iter_mut().find(|i| i.id == item)
+                    && data.id == list
+                {
+                    item.name = name;
+                }
+            }
+
+            Response::ItemCompleted {
+                list,
+                item,
+                completed,
+            } => {
+                if let Page::List(ref mut data) = data.page
+                    && let Some(item) = data.items.iter_mut().find(|i| i.id == item)
+                    && data.id == list
+                {
                     item.completed = completed;
                 }
             }
         },
     )
-}
-
-fn input(_data: &Data) -> impl View<Data> + use<> {
-    with(
-        |_| String::new(),
-        |state, _data| {
-            column(
-                textinput()
-                    .text(state)
-                    .size(18.0)
-                    .newline(Newline::None)
-                    .accept_tab(false)
-                    .color(theme::CONTRAST)
-                    .placeholder("Hvad mangler vi?")
-                    .placeholder_color(theme::CONTRAST.fade(0.6))
-                    .on_submit(|(state, data): &mut (String, Data), text| {
-                        state.clear();
-
-                        let item = Item {
-                            id: Uuid::new_v4(),
-                            name: text,
-                            completed: false,
-                        };
-
-                        data.request(Request::CreateItem(item.clone()));
-                        data.items.push(item);
-                    }),
-            )
-            .background_color(theme::BACKGROUND.darken(0.04))
-            .corner(20.0)
-            .padding(20.0)
-            .flex(1.0)
-        },
-    )
-}
-
-fn items(data: &Data) -> impl View<Data> + Layout + use<> {
-    let complete = data
-        .items
-        .iter()
-        .enumerate()
-        .rev()
-        .filter(|(_, i)| i.completed);
-
-    let items = data
-        .items
-        .iter()
-        .enumerate()
-        .rev()
-        .filter(|(_, i)| !i.completed)
-        .chain(complete)
-        .map(|(index, item)| (item.id, self::item(index, item)));
-
-    column(vscroll(column(keyed(items))).flex(1.0))
-        .background_color(Color::BLACK.fade(0.05))
-        .corner(20.0)
-        .overflow(Overflow::Hidden)
-}
-
-fn item(index: usize, item: &Item) -> impl View<Data> + use<> {
-    row((
-        item_completed(index, item.completed),
-        item_name(index, &item.name).flex(1.0),
-        remove_item(index),
-    ))
-    .align_items(Align::Center)
-    .padding(12.0)
-    .gap(10.0)
-}
-
-fn item_name(index: usize, name: &str) -> impl View<Data> + Layout + use<> {
-    textinput()
-        .text(name)
-        .size(18.0)
-        .color(theme::CONTRAST)
-        .newline(Newline::None)
-        .accept_tab(false)
-        .on_change(move |data: &mut Data, text| {
-            let item = &mut data.items[index];
-            item.name = text;
-
-            let request = Request::RenameItem {
-                id: item.id,
-                name: item.name.clone(),
-            };
-
-            data.request(request);
-        })
-}
-
-fn item_completed(index: usize, completed: bool) -> impl View<Data> + use<> {
-    let color = if completed {
-        theme::PRIMARY
-    } else {
-        Color::TRANSPARENT
-    };
-
-    pressable(move |_, _| {
-        row(image(include_bytes!("check.svg"))
-            .tint(color)
-            .size(20.0, 20.0))
-        .border_color(theme::OUTLINE)
-        .padding(4.0)
-        .border(1.0)
-        .corner(8.0)
-    })
-    .on_press(move |data: &mut Data| {
-        let item = &mut data.items[index];
-        item.completed = !item.completed;
-
-        let request = Request::CompleteItem {
-            id: item.id,
-            completed: item.completed,
-        };
-
-        data.request(request);
-    })
-}
-
-fn remove_item(index: usize) -> impl View<Data> + use<> {
-    pressable(|_, _| {
-        row(image(include_bytes!("xmark.svg"))
-            .tint(Color::RED.fade(0.7))
-            .size(28.0, 28.0))
-        .padding(4.0)
-        .border(1.0)
-        .corner(8.0)
-    })
-    .on_press(move |data: &mut Data| {
-        let item = data.items.remove(index);
-        data.request(Request::RemoveItem(item.id));
-    })
-}
-
-fn remove_completed() -> impl View<Data> + use<> {
-    pressable(|_, state| {
-        let color = match state.pressed {
-            true => theme::PRIMARY.darken(0.1),
-            false => theme::PRIMARY,
-        };
-
-        transition(color, Ease(0.1), |_, color| {
-            row(text("Slet handlede")
-                .color(Color::BLACK.fade(0.8))
-                .size(18.0))
-            .background_color(color)
-            .padding(20.0)
-            .corner(20.0)
-            .justify_contents(Justify::Center)
-            .align_items(Align::Center)
-        })
-    })
-    .on_press(|data: &mut Data| {
-        data.items.retain(|item| {
-            if item.completed
-                && let Some(ref sender) = data.sender
-            {
-                let _ = sender.send(Request::RemoveItem(item.id));
-            }
-
-            !item.completed
-        });
-    })
 }

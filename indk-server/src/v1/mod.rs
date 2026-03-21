@@ -10,12 +10,21 @@ use futures::{SinkExt, StreamExt};
 use indk_proto::v1::{Item, Request, Response};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use uuid::Uuid;
 
 use crate::ServerState;
 
 #[derive(Serialize, Deserialize)]
 pub struct Data {
+    pub lists: Vec<List>,
     pub items: Vec<Item>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct List {
+    pub id: Uuid,
+    pub name: String,
+    pub items: Vec<Uuid>,
 }
 
 pub async fn router() -> Router<Arc<ServerState>> {
@@ -57,45 +66,149 @@ async fn ws(State(server): State<Arc<ServerState>>, ws: WebSocketUpgrade) -> imp
 
 async fn respond(server: &ServerState, sender: &UnboundedSender<Response>, request: Request) {
     match request {
-        Request::GetItems => {
-            let _ = sender.send(Response::Items(server.get_items()));
+        Request::GetLists {} => {
+            let lists = server
+                .lists
+                .lists
+                .iter()
+                .map(|list| indk_proto::v1::List {
+                    id: list.id,
+                    name: list.name.clone(),
+                })
+                .collect();
+
+            let _ = sender.send(Response::Lists { lists });
         }
 
-        Request::CreateItem(item) => {
+        Request::CreateList { list } => {
+            server.lists.lists.insert(
+                list.id,
+                List {
+                    id: list.id,
+                    name: list.name.clone(),
+                    items: Vec::new(),
+                },
+            );
+
             let index = {
-                let mut order = server.items.order.write();
-                order.push(item.id);
+                let mut order = server.lists.order.write();
+                order.push(list.id);
                 order.len() - 1
             };
 
-            server.items.items.insert(item.id, item.clone());
-            server.send_all(Some(sender), Response::ItemCreated { item, index });
+            server.send_all(Some(sender), Response::ListCreated { list, index });
         }
 
-        Request::RemoveItem(id) => {
+        Request::RemoveList { list } => {
+            let _ = server.items.items.remove(&list);
+
+            server.send_all(Some(sender), Response::ListRemoved { list });
+        }
+
+        Request::RenameList { list, name } => {
+            if let Some(mut list) = server.lists.lists.get_mut(&list) {
+                list.name = name.clone();
+            }
+
+            server.send_all(Some(sender), Response::ListRenamed { list, name });
+        }
+
+        Request::GetItems { list } => {
+            let Some(list) = server.lists.lists.get(&list) else {
+                return;
+            };
+
+            let items = list
+                .items
+                .iter()
+                .filter_map(|item| {
+                    let item = server.items.items.get(item)?;
+                    Some(item.clone())
+                })
+                .collect();
+
+            let _ = sender.send(Response::Items {
+                list: list.id,
+                items,
+            });
+        }
+
+        Request::CreateItem { list, item } => {
+            let Some(mut list) = server.lists.lists.get_mut(&list) else {
+                return;
+            };
+
+            server.items.items.insert(item.id, item.clone());
+
+            let index = {
+                list.items.push(item.id);
+                list.items.len() - 1
+            };
+
+            server.send_all(
+                Some(sender),
+                Response::ItemCreated {
+                    list: list.id,
+                    item,
+                    index,
+                },
+            );
+        }
+
+        Request::RemoveItem { list, item: id } => {
             let _ = server.items.items.remove(&id);
 
-            let mut order = server.items.order.write();
-            if let Some(index) = order.iter().position(|x| *x == id) {
-                order.remove(index);
-                server.send_all(Some(sender), Response::ItemRemoved { id, index });
+            if let Some(mut list) = server.lists.lists.get_mut(&list)
+                && let Some(index) = list.items.iter().position(|x| *x == id)
+            {
+                list.items.remove(index);
+                server.send_all(
+                    Some(sender),
+                    Response::ItemRemoved {
+                        list: list.id,
+                        item: id,
+                        index,
+                    },
+                );
             }
         }
 
-        Request::RenameItem { id, name } => {
+        Request::RenameItem {
+            list,
+            item: id,
+            name,
+        } => {
             if let Some(mut item) = server.items.items.get_mut(&id) {
                 item.name = name.clone();
             }
 
-            server.send_all(Some(sender), Response::ItemRenamed { id, name });
+            server.send_all(
+                Some(sender),
+                Response::ItemRenamed {
+                    list,
+                    item: id,
+                    name,
+                },
+            );
         }
 
-        Request::CompleteItem { id, completed } => {
+        Request::CompleteItem {
+            list,
+            item: id,
+            completed,
+        } => {
             if let Some(mut item) = server.items.items.get_mut(&id) {
                 item.completed = completed;
             }
 
-            server.send_all(Some(sender), Response::ItemCompleted { id, completed });
+            server.send_all(
+                Some(sender),
+                Response::ItemCompleted {
+                    list,
+                    item: id,
+                    completed,
+                },
+            );
         }
     }
 }

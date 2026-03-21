@@ -26,11 +26,15 @@ indk-proto.workspace = true
 eyre = "0.6"
 tokio = { version = "1", features = ["full"] }
 futures = { version = "0.3", default-features = false }
-reqwest = { version = "0.13", features = ["native-tls"] }
 reqwest-websocket = { version = "0.6", features = ["json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 ori-native = { git = "https://github.com/ori-ui/ori-native" }
+
+[dependencies.reqwest]
+version = "0.13"
+default-features = false
+features = ["native-tls"]
 
 [dependencies.openssl]
 version = "0.10"
