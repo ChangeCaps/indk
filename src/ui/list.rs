@@ -8,19 +8,34 @@ pub fn page(data: &ListData) -> impl View<(Global, ListData)> + use<> {
     column(transition(
         data.is_menu_open as i32 as f32,
         BackInOut(0.8),
-        |(_, data), t| {
+        |(global, data), t| {
             let menu = (t > 0.0).then(|| menu(t));
-            flex((page_contents(data), menu)).flex(1.0).min_height(0.0)
+            flex((page_contents(global, data), menu))
+                .flex(1.0)
+                .min_height(0.0)
         },
     ))
     .background(theme::BACKGROUND)
     .flex(1.0)
 }
 
-fn page_contents(data: &ListData) -> impl View<(Global, ListData)> + use<> {
+fn page_contents(global: &Global, data: &ListData) -> impl View<(Global, ListData)> + use<> {
+    let list = global.lists.iter().find(|list| list.id == data.id).unwrap();
+
     safe_area(
         column((
-            row((input(), menu_button())).gap(10.0),
+            row((
+                row(()).width(48.0),
+                text(&list.name)
+                    .size(24.0)
+                    .family("Inter")
+                    .color(theme::CONTRAST.fade(0.8)),
+                menu_button(),
+            ))
+            .justify_contents(Justify::SpaceBetween)
+            .align_items(Align::Center)
+            .padding_left(10.0),
+            input(),
             items(data).flex(1.0),
             remove_completed(),
         ))
@@ -44,7 +59,7 @@ fn menu(t: f32) -> impl View<(Global, ListData)> + use<> {
                 .shadow_radius(50.0)
                 .corner(20.0)
         })
-        .on_press(|_| info!("click")))
+        .on_press(|_| {}))
         .background(Color::BLACK.fade(0.2 * t))
         .position(Position::Absolute)
         .inset(0.0)
@@ -67,17 +82,15 @@ fn menu_contents() -> impl View<(Global, ListData)> + use<> {
 fn menu_button() -> impl View<(Global, ListData)> + use<> {
     pressable(|_, state| {
         let color = match state.pressed {
-            true => theme::PRIMARY.darken(0.1),
-            false => theme::PRIMARY,
+            true => theme::CONTRAST.fade(0.6),
+            false => theme::CONTRAST.fade(0.8),
         };
 
         transition(color, Ease(0.1), |_, color| {
             row(image(include_bytes!("../icon/menu.svg"))
                 .size(28.0, 28.0)
-                .tint(theme::CONTRAST.fade(0.8)))
-            .background(color.fade(0.5))
-            .padding(20.0)
-            .corner(20.0)
+                .tint(color))
+            .padding(10.0)
             .justify_contents(Justify::Center)
             .align_items(Align::Center)
         })
@@ -121,7 +134,6 @@ fn input() -> impl View<(Global, ListData)> + use<> {
             .background(theme::BACKGROUND.darken(0.04))
             .corner(20.0)
             .padding(20.0)
-            .flex(1.0)
         },
     )
 }

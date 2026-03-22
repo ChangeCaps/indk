@@ -58,6 +58,8 @@ fn list(index: usize) -> impl View<Global> + use<> {
                     .size(18.0)
                     .color(theme::CONTRAST)
                     .flex(1.0)
+                    .newline(Newline::None)
+                    .accept_tab(false)
                     .on_change(move |(_, global): &mut (_, Global), text| {
                         global.lists[index].name = text;
 

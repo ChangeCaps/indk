@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, time::Duration};
 
 use futures::{SinkExt, StreamExt};
 use indk_proto::v1::{Item, List, Request, Response};
@@ -145,6 +145,8 @@ fn responses() -> impl Effect<Data> + use<> {
                     if let Err(err) = try_loop(&sink, &mut receiver).await {
                         warn!("connection failed with {err:?}");
                     }
+
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
         },
