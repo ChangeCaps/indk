@@ -49,66 +49,67 @@ pub fn lists(global: &Global) -> impl View<Global> + Layout + use<> {
 fn list(index: usize) -> impl View<Global> + use<> {
     with(
         |_| false,
-        move |_, _| {
-            pressable(move |(edit, global): &(bool, Global), _| {
-                let list = &global.lists[index];
+        move |edit, global: &Global| {
+            let list = &global.lists[index];
 
-                let name = match edit {
-                    true => any(textinput()
-                        .text(&list.name)
-                        .size(18.0)
-                        .color(theme::CONTRAST)
-                        .flex(1.0)
-                        .on_change(move |(_, global): &mut (_, Global), text| {
-                            global.lists[index].name = text;
+            let name = match edit {
+                true => any(textinput()
+                    .text(&list.name)
+                    .size(18.0)
+                    .color(theme::CONTRAST)
+                    .flex(1.0)
+                    .on_change(move |(_, global): &mut (_, Global), text| {
+                        global.lists[index].name = text;
 
-                            Action::message(
-                                Request::RenameList {
-                                    list: global.lists[index].id,
-                                    name: global.lists[index].name.clone(),
-                                },
-                                None,
-                            )
-                            .with_rebuild(true)
-                        })),
+                        Action::message(
+                            Request::RenameList {
+                                list: global.lists[index].id,
+                                name: global.lists[index].name.clone(),
+                            },
+                            None,
+                        )
+                        .with_rebuild(true)
+                    })),
 
-                    false => any(text(&list.name).size(18.0).color(theme::CONTRAST)),
-                };
+                false => any(pressable(move |(_, global): &(_, Global), _| {
+                    let list = &global.lists[index];
+                    text(&list.name).size(18.0).color(theme::CONTRAST).flex(1.0)
+                })
+                .on_press(move |(_, global)| {
+                    Action::new()
+                        .with_message(
+                            Page::List(ListData {
+                                id: global.lists[index].id,
+                                items: Vec::new(),
+                                is_menu_open: false,
+                            }),
+                            None,
+                        )
+                        .with_message(
+                            Request::GetItems {
+                                list: global.lists[index].id,
+                            },
+                            None,
+                        )
+                })),
+            };
 
-                row((
-                    name,
-                    pressable(|(edit, _): &(bool, _), _| {
-                        let color = match edit {
-                            true => theme::PRIMARY,
-                            false => theme::CONTRAST,
-                        };
+            row((
+                name,
+                pressable(|(edit, _): &(bool, _), _| {
+                    let color = match edit {
+                        true => theme::PRIMARY,
+                        false => theme::CONTRAST,
+                    };
 
-                        image(include_bytes!("../icon/edit.svg"))
-                            .tint(color)
-                            .size(32.0, 32.0)
-                    })
-                    .on_press(|(edit, _): &mut (bool, _)| *edit = !*edit),
-                ))
-                .justify_contents(Justify::SpaceBetween)
-                .align_items(Align::Center)
-            })
-            .on_press(move |(_, global)| {
-                Action::new()
-                    .with_message(
-                        Page::List(ListData {
-                            id: global.lists[index].id,
-                            items: Vec::new(),
-                            is_menu_open: false,
-                        }),
-                        None,
-                    )
-                    .with_message(
-                        Request::GetItems {
-                            list: global.lists[index].id,
-                        },
-                        None,
-                    )
-            })
+                    image(include_bytes!("../icon/edit.svg"))
+                        .tint(color)
+                        .size(32.0, 32.0)
+                })
+                .on_press(|(edit, _): &mut (bool, _)| *edit = !*edit),
+            ))
+            .justify_contents(Justify::SpaceBetween)
+            .align_items(Align::Center)
         },
     )
 }
