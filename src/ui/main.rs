@@ -8,7 +8,7 @@ pub fn page(data: &Data) -> impl View<Data> + use<> {
         |data: &mut Data, map| map(&mut data.global),
     ))
     .background(theme::BACKGROUND)
-    .justify_contents(Justify::Center)
+    .justify_content(Justify::Center)
     .align_items(Align::Center)
     .flex(1.0)
 }

@@ -32,7 +32,7 @@ fn page_contents(global: &Global, data: &ListData) -> impl View<(Global, ListDat
                     .color(theme::CONTRAST.fade(0.8)),
                 menu_button(),
             ))
-            .justify_contents(Justify::SpaceBetween)
+            .justify_content(Justify::SpaceBetween)
             .align_items(Align::Center)
             .padding_left(10.0),
             input(),
@@ -91,7 +91,7 @@ fn menu_button() -> impl View<(Global, ListData)> + use<> {
                 .size(28.0, 28.0)
                 .tint(color))
             .padding(10.0)
-            .justify_contents(Justify::Center)
+            .justify_content(Justify::Center)
             .align_items(Align::Center)
         })
     })
@@ -206,9 +206,8 @@ fn item_completed(index: usize, completed: bool) -> impl View<(Global, ListData)
         row(image(include_bytes!("../icon/check.svg"))
             .tint(color)
             .size(20.0, 20.0))
-        .border_color(theme::OUTLINE)
+        .border(1.0, theme::OUTLINE)
         .padding(4.0)
-        .border(1.0)
         .corner(8.0)
     })
     .on_press(move |(_, data): &mut (_, ListData)| {
@@ -232,8 +231,8 @@ fn remove_item(index: usize) -> impl View<(Global, ListData)> + use<> {
         row(image(include_bytes!("../icon/xmark.svg"))
             .tint(Color::RED.fade(0.7))
             .size(28.0, 28.0))
+        .border_width(1.0)
         .padding(4.0)
-        .border(1.0)
         .corner(8.0)
     })
     .on_press(move |(_, data): &mut (_, ListData)| {
@@ -263,7 +262,7 @@ fn remove_completed() -> impl View<(Global, ListData)> + use<> {
             .background(color)
             .padding(20.0)
             .corner(20.0)
-            .justify_contents(Justify::Center)
+            .justify_content(Justify::Center)
             .align_items(Align::Center)
         })
     })

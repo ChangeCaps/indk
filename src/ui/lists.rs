@@ -19,7 +19,7 @@ pub fn lists(global: &Global) -> impl View<Global> + Layout + use<> {
                 .size(40.0)
                 .color(theme::CONTRAST.fade(0.8)),
         )
-        .border_bottom(2.0)
+        .border_bottom_width(2.0)
         .border_color(theme::CONTRAST.fade(0.8)),
         lists,
         pressable(|_, _| {
@@ -110,7 +110,7 @@ fn list(index: usize) -> impl View<Global> + use<> {
                 })
                 .on_press(|(edit, _): &mut (bool, _)| *edit = !*edit),
             ))
-            .justify_contents(Justify::SpaceBetween)
+            .justify_content(Justify::SpaceBetween)
             .align_items(Align::Center)
         },
     )
