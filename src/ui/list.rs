@@ -68,7 +68,7 @@ fn menu(t: f32) -> impl View<(Global, ListData)> + use<> {
 }
 
 fn menu_contents() -> impl View<(Global, ListData)> + use<> {
-    using_or_default(|(global, _): &(Global, _), insets: &SafeAreaInsets| {
+    using_or_default(|(global, _): &(Global, _), SafeAreaInsets(insets)| {
         column(map(ui::lists::lists(global), |(global, _), map| {
             map(global)
         }))

@@ -9,6 +9,8 @@ use uuid::Uuid;
 
 mod ui;
 
+static MODAL: ViewId = ViewId::new("indk.main.modal");
+
 #[ori_native::main]
 pub fn main() -> eyre::Result<()> {
     App::init_log();
@@ -109,7 +111,7 @@ fn ui(data: &Data) -> impl Effect<Data> + use<> {
     };
 
     effects((
-        window(contents)
+        window(column((contents, portal(MODAL))).flex(1.0))
             .status_bar(StatusBar {
                 color: Some(Color::TRANSPARENT),
                 light: true,
@@ -120,14 +122,14 @@ fn ui(data: &Data) -> impl Effect<Data> + use<> {
                 light: true,
             }),
         responses(),
-        receive(|data: &mut Data, request: Request| {
+        receive(None, |data: &mut Data, request: Request| {
             if let Some(ref sender) = data.sender {
                 let _ = sender.send(request);
             }
 
             Action::new()
         }),
-        receive(|data: &mut Data, page: Page| {
+        receive(None, |data: &mut Data, page: Page| {
             data.page = page;
         }),
     ))

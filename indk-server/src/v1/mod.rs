@@ -100,7 +100,7 @@ async fn respond(server: &ServerState, sender: &UnboundedSender<Response>, reque
         }
 
         Request::RemoveList { list } => {
-            let _ = server.items.items.remove(&list);
+            let _ = server.lists.lists.remove(&list);
 
             server.send_all(Some(sender), Response::ListRemoved { list });
         }
